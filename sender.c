@@ -43,6 +43,45 @@ static void make_address(char const* host, unsigned short port, struct sockaddr_
   }
 }
 
+
+/* Option: --mcast group_ip_address */
+static void do_mcast(struct configuration* cfg, int sock)
+{
+  struct ip_mreq req;
+
+  if (cfg->cfg_mcast == NULL)
+    return;
+
+  bzero(&req, sizeof(req));
+  TRY(inet_aton(cfg->cfg_mcast, &req.imr_multiaddr));
+
+  req.imr_interface.s_addr = INADDR_ANY;
+  TRY(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &req, sizeof(req)));
+
+
+
+  //* set multicast group for outgoing packets
+	inet_aton("224.0.0.1", &iaddr); //* alternate PTP domain 1 
+	addr.sin_addr = iaddr;
+	imr.imr_multiaddr.s_addr = iaddr.s_addr;
+	imr.imr_interface.s_addr =
+		((struct sockaddr_in *)&device.ifr_addr)->sin_addr.s_addr;
+	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
+		       &imr.imr_interface.s_addr, sizeof(struct in_addr)) < 0)
+		bail("set multicast");
+
+	//* join multicast group, loop our own packet 
+	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+		       &imr, sizeof(struct ip_mreq)) < 0)
+		bail("join multicast group");
+
+	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP,
+		       &ip_multicast_loop, sizeof(enabled)) < 0) {
+		bail("loop multicast");
+	}
+}
+
+
 int setup_socket(int sock, struct configuration cfg){
 	int so_timestamping_flags = 0;
 	int so_timestamp = 0;
@@ -103,35 +142,14 @@ int setup_socket(int sock, struct configuration cfg){
 	}
 	DEBUG("SIOCSHWTSTAMP: tx_type %d requested, got %d; rx_filter %d requested, got %d\n", hwconfig_requested.tx_type, hwconfig.tx_type, hwconfig_requested.rx_filter, hwconfig.rx_filter);
 
+	make_address(cfg->host, cfg->port, addr);
 	
-	// bind to PTP port 
-	addr.sin_family = AF_INET;
-	addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	addr.sin_port = htons(321); //PTP event port 
 	if (bind(sock,
 		 (struct sockaddr *)&addr,
 		 sizeof(struct sockaddr_in)) < 0)
 		bail("bind");
 	
-	//* set multicast group for outgoing packets
-	inet_aton("224.0.0.1", &iaddr); //* alternate PTP domain 1 
-	addr.sin_addr = iaddr;
-	imr.imr_multiaddr.s_addr = iaddr.s_addr;
-	imr.imr_interface.s_addr =
-		((struct sockaddr_in *)&device.ifr_addr)->sin_addr.s_addr;
-	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
-		       &imr.imr_interface.s_addr, sizeof(struct in_addr)) < 0)
-		bail("set multicast");
-
-	//* join multicast group, loop our own packet 
-	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-		       &imr, sizeof(struct ip_mreq)) < 0)
-		bail("join multicast group");
-
-	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP,
-		       &ip_multicast_loop, sizeof(enabled)) < 0) {
-		bail("loop multicast");
-	}
+	
 
 	// set socket options for time stamping 
 	if (so_timestamp &&
