@@ -7,6 +7,25 @@
 	},
 	"buffers":
 	[
+		{
+			"contents": "#include \"headers.h\"\n\nstatic void sendpacket(int sock, struct sockaddr *addr, socklen_t addr_len)\n{\n	struct timeval now;\n	int res;\n\n	struct timespec app_ts;\n	size_t timespec_size = sizeof(struct timespec);\n	//clock_gettime(CLOCK_MONOTONIC_RAW, &app_ts);\n	clock_gettime(CLOCK_REALTIME, &app_ts);\n	//res = sendto(sock, sync, sizeof(sync), 0, addr, addr_len);\n	res = sendto(sock, &app_ts, timespec_size, 0, addr, addr_len);\n	gettimeofday(&now, 0);\n	if (res < 0)\n		DEBUG(\"IN_SENDPACKET::%s: %s\\n\", \"send\", strerror(errno));\n	else\n		DEBUG(\"IN_SENDPACKET::%ld.%06ld: sent %d bytes\\n\", (long)now.tv_sec, (long)now.tv_usec, res);\n}\n\n\nint set_socket_reuse(int sock){\n	int on = 1;\n	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));\n	return 0;\n}\n\nstatic void make_address(char const* host, unsigned short port, struct sockaddr_in* host_address){\n  struct hostent *hPtr;\n\n  bzero(host_address, sizeof(struct sockaddr_in));\n\n  host_address->sin_family = AF_INET;\n  host_address->sin_port = htons(port);\n\n  if (host != NULL) {\n    hPtr = (struct hostent *) gethostbyname(host);\n    TEST( hPtr != NULL );\n\n    memcpy((char *)&host_address->sin_addr, hPtr->h_addr, hPtr->h_length);\n  } else {\n    host_address->sin_addr.s_addr=INADDR_ANY;\n  }\n}\n	\n\n/* Option: --mcast group_ip_address */\nstatic void do_mcast(struct configuration* cfg, int sock)\n{\n  struct ip_mreq req;\n\n  if (cfg->cfg_mcast == NULL)\n    return;\n\n  bzero(&req, sizeof(req));\n  TRY(inet_aton(cfg->cfg_mcast, &req.imr_multiaddr));\n\n  req.imr_interface.s_addr = INADDR_ANY;\n  TRY(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &req, sizeof(req)));\n\n\n\n  //* set multicast group for outgoing packets\n	inet_aton(\"224.0.0.1\", &iaddr); //* alternate PTP domain 1 \n	addr.sin_addr = iaddr;\n	imr.imr_multiaddr.s_addr = iaddr.s_addr;\n	imr.imr_interface.s_addr =\n		((struct sockaddr_in *)&device.ifr_addr)->sin_addr.s_addr;\n	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,\n		       &imr.imr_interface.s_addr, sizeof(struct in_addr)) < 0)\n		bail(\"set multicast\");\n\n	//* join multicast group, loop our own packet \n	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,\n		       &imr, sizeof(struct ip_mreq)) < 0)\n		bail(\"join multicast group\");\n\n	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP,\n		       &ip_multicast_loop, sizeof(enabled)) < 0) {\n		bail(\"loop multicast\");\n	}\n}\n\n\nint setup_socket(int sock, struct configuration cfg){\n	int so_timestamping_flags = 0;\n	int so_timestamp = 0;\n	int so_timestampns = 0;\n	int siocgstamp = 0;\n	int siocgstampns = 0;\n	int ip_multicast_loop = 0;\n	int i;\n	int enabled = 1;\n	\n	struct ifreq device;\n	struct ifreq hwtstamp;\n	struct hwtstamp_config hwconfig, hwconfig_requested;\n	struct sockaddr_in addr;\n	struct ip_mreq imr;\n	struct in_addr iaddr;\n	int val;\n	socklen_t len;\n	struct timeval next;\n\n	so_timestamping_flags |= SOF_TIMESTAMPING_TX_HARDWARE;\n	so_timestamping_flags |= SOF_TIMESTAMPING_RX_HARDWARE;\n	so_timestamping_flags |= SOF_TIMESTAMPING_RAW_HARDWARE;\n\n	sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);\n	if (sock < 0)\n		bail(\"socket\");\n	\n\n	memset(&device, 0, sizeof(device));\n	strncpy(device.ifr_name, cfg->interface, sizeof(device.ifr_name));\n	if (ioctl(sock, SIOCGIFADDR, &device) < 0)\n		bail(\"getting interface IP address\");\n\n	memset(&hwtstamp, 0, sizeof(hwtstamp));\n	strncpy(hwtstamp.ifr_name, cfg->interface, sizeof(hwtstamp.ifr_name));\n	hwtstamp.ifr_data = (void *)&hwconfig;\n	memset(&hwconfig, 0, sizeof(hwconfig));\n	\n\n	hwconfig.tx_type =\n		(so_timestamping_flags & SOF_TIMESTAMPING_TX_HARDWARE) ?\n		HWTSTAMP_TX_ON : HWTSTAMP_TX_OFF;\n	hwconfig.rx_filter =\n		(so_timestamping_flags & SOF_TIMESTAMPING_RX_HARDWARE) ?\n		//HWTSTAMP_FILTER_PTP_V1_L4_SYNC : HWTSTAMP_FILTER_NONE;\n		HWTSTAMP_FILTER_ALL : HWTSTAMP_FILTER_NONE;\n	hwconfig_requested = hwconfig;\n\n	\n	if (ioctl(sock, SIOCSHWTSTAMP, &hwtstamp) < 0) {\n		if ((errno == EINVAL || errno == ENOTSUP) &&\n		    hwconfig_requested.tx_type == HWTSTAMP_TX_OFF &&\n		    hwconfig_requested.rx_filter == HWTSTAMP_FILTER_NONE)\n			DEBUG(\"SIOCSHWTSTAMP: disabling hardware time stamping not possible\\n\");\n		else\n			bail(\"SIOCSHWTSTAMP\");\n	}\n	DEBUG(\"SIOCSHWTSTAMP: tx_type %d requested, got %d; rx_filter %d requested, got %d\\n\", hwconfig_requested.tx_type, hwconfig.tx_type, hwconfig_requested.rx_filter, hwconfig.rx_filter);\n\n	make_address(cfg->host, cfg->port, addr);\n	\n	if (bind(sock,\n		 (struct sockaddr *)&addr,\n		 sizeof(struct sockaddr_in)) < 0)\n		bail(\"bind\");\n	\n	\n\n	// set socket options for time stamping \n	if (so_timestamp &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMP,\n			   &enabled, sizeof(enabled)) < 0)\n		bail(\"setsockopt SO_TIMESTAMP\");\n\n	if (so_timestampns &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPNS,\n			   &enabled, sizeof(enabled)) < 0)\n		bail(\"setsockopt SO_TIMESTAMPNS\");\n\n	if (so_timestamping_flags &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING,\n			   &so_timestamping_flags,\n			   sizeof(so_timestamping_flags)) < 0)\n		bail(\"setsockopt SO_TIMESTAMPING\");\n\n	// request IP_PKTINFO for debugging purposes \n	if (setsockopt(sock, SOL_IP, IP_PKTINFO,\n		       &enabled, sizeof(enabled)) < 0)\n		DEBUG(\"%s: %s\\n\", \"setsockopt IP_PKTINFO\", strerror(errno));\n\n	// verify socket options \n	len = sizeof(val);\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMP, &val, &len) < 0)\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMP\", strerror(errno));\n	else\n		DEBUG(\"SO_TIMESTAMP %d\\n\", val);\n\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMPNS, &val, &len) < 0)\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMPNS\",\n		       strerror(errno));\n	else\n		DEBUG(\"SO_TIMESTAMPNS %d\\n\", val);\n\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING, &val, &len) < 0) {\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMPING\",\n		       strerror(errno));\n	} else {\n		DEBUG(\"SO_TIMESTAMPING %d\\n\", val);\n		if (val != so_timestamping_flags)\n			DEBUG(\"   not the expected value %d\\n\",\n			       so_timestamping_flags);\n	}\n\n	return 0;\n}\n\n\n\nint sender(int argc, char **argv)\n{\n	struct configuration cfg;\n	parse_options(argc, argv, &cfg);\n\n	int sock;\n\n\n\n\n	// send packets forever every five seconds \n	//gettimeofday(&next, 0);\n	//next.tv_sec = (next.tv_sec + 1) ;\n	//next.tv_usec = 0;\n	\n	while(1){\n		sendpacket(sock, (struct sockaddr *)&addr, sizeof(addr));\n	}\n/*\n	while (1) {\n		struct timeval now;\n		struct timeval delta;\n		long delta_us;\n		int res;\n		fd_set readfs, errorfs;\n\n		gettimeofday(&now, 0);\n		delta_us = (long)(next.tv_sec - now.tv_sec) * 1000000 + (long)(next.tv_usec - now.tv_usec);\n\n		if(delta_us < 0){\n			// write one packet \n			sendpacket(sock, (struct sockaddr *)&addr, sizeof(addr));\n			next.tv_sec = next.tv_sec + ((long)(1000+next.tv_usec))/1000000;\n			next.tv_usec = ((long)(1000+next.tv_usec))%1000000;\n			continue;\n		}\n	}\n*/	\n	return 0;\n}\n\n\n\n/*\nint sender(int argc, char **argv)\n{\n	int so_timestamping_flags = 0;\n	int so_timestamp = 0;\n	int so_timestampns = 0;\n	int siocgstamp = 0;\n	int siocgstampns = 0;\n	int ip_multicast_loop = 0;\n	char *interface;\n	int i;\n	int enabled = 1;\n	int sock;\n	struct ifreq device;\n	struct ifreq hwtstamp;\n	struct hwtstamp_config hwconfig, hwconfig_requested;\n	struct sockaddr_in addr;\n	struct ip_mreq imr;\n	struct in_addr iaddr;\n	int val;\n	socklen_t len;\n	struct timeval next;\n\n	interface = \"eth0\";\n\n	so_timestamping_flags |= SOF_TIMESTAMPING_TX_HARDWARE;\n	//so_timestamping_flags |= SOF_TIMESTAMPING_TX_SOFTWARE;\n	so_timestamping_flags |= SOF_TIMESTAMPING_RX_HARDWARE;\n	so_timestamping_flags |= SOF_TIMESTAMPING_RAW_HARDWARE;\n\n	sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);\n	if (sock < 0)\n		bail(\"socket\");\n	int on = 1;\n	setsockopt( sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on) );\n\n	memset(&device, 0, sizeof(device));\n	strncpy(device.ifr_name, interface, sizeof(device.ifr_name));\n	if (ioctl(sock, SIOCGIFADDR, &device) < 0)\n		bail(\"getting interface IP address\");\n\n	memset(&hwtstamp, 0, sizeof(hwtstamp));\n	strncpy(hwtstamp.ifr_name, interface, sizeof(hwtstamp.ifr_name));\n	hwtstamp.ifr_data = (void *)&hwconfig;\n	memset(&hwconfig, 0, sizeof(hwconfig));\n	\n\n	hwconfig.tx_type =\n		(so_timestamping_flags & SOF_TIMESTAMPING_TX_HARDWARE) ?\n		HWTSTAMP_TX_ON : HWTSTAMP_TX_OFF;\n	hwconfig.rx_filter =\n		(so_timestamping_flags & SOF_TIMESTAMPING_RX_HARDWARE) ?\n		//HWTSTAMP_FILTER_PTP_V1_L4_SYNC : HWTSTAMP_FILTER_NONE;\n		HWTSTAMP_FILTER_ALL : HWTSTAMP_FILTER_NONE;\n	hwconfig_requested = hwconfig;\n\n	\n	if (ioctl(sock, SIOCSHWTSTAMP, &hwtstamp) < 0) {\n		if ((errno == EINVAL || errno == ENOTSUP) &&\n		    hwconfig_requested.tx_type == HWTSTAMP_TX_OFF &&\n		    hwconfig_requested.rx_filter == HWTSTAMP_FILTER_NONE)\n			DEBUG(\"SIOCSHWTSTAMP: disabling hardware time stamping not possible\\n\");\n		else\n			bail(\"SIOCSHWTSTAMP\");\n	}\n	DEBUG(\"SIOCSHWTSTAMP: tx_type %d requested, got %d; rx_filter %d requested, got %d\\n\", hwconfig_requested.tx_type, hwconfig.tx_type, hwconfig_requested.rx_filter, hwconfig.rx_filter);\n\n	\n	addr.sin_family = AF_INET;\n	addr.sin_addr.s_addr = htonl(INADDR_ANY);\n	addr.sin_port = htons(321); //PTP event port \n	if (bind(sock,\n		 (struct sockaddr *)&addr,\n		 sizeof(struct sockaddr_in)) < 0)\n		bail(\"bind\");\n	\n	//* set multicast group for outgoing packets\n	inet_aton(\"11.11.11.2\", &iaddr); \n	addr.sin_addr = iaddr;\n        \n	imr.imr_multiaddr.s_addr = iaddr.s_addr;\n	imr.imr_interface.s_addr =\n		((struct sockaddr_in *)&device.ifr_addr)->sin_addr.s_addr;\n	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,\n		       &imr.imr_interface.s_addr, sizeof(struct in_addr)) < 0)\n		bail(\"set multicast\");\n\n	//* join multicast group, loop our own packet \n	if (setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP,\n		       &imr, sizeof(struct ip_mreq)) < 0)\n		bail(\"join multicast group\");\n\n	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_LOOP,\n		       &ip_multicast_loop, sizeof(enabled)) < 0) {\n		bail(\"loop multicast\");\n	}\n\n	// set socket options for time stamping \n	if (so_timestamp &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMP,\n			   &enabled, sizeof(enabled)) < 0)\n		bail(\"setsockopt SO_TIMESTAMP\");\n\n	if (so_timestampns &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPNS,\n			   &enabled, sizeof(enabled)) < 0)\n		bail(\"setsockopt SO_TIMESTAMPNS\");\n\n	if (so_timestamping_flags &&\n		setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING,\n			   &so_timestamping_flags,\n			   sizeof(so_timestamping_flags)) < 0)\n		bail(\"setsockopt SO_TIMESTAMPING\");\n\n	// request IP_PKTINFO for debugging purposes \n	if (setsockopt(sock, SOL_IP, IP_PKTINFO,\n		       &enabled, sizeof(enabled)) < 0)\n		DEBUG(\"%s: %s\\n\", \"setsockopt IP_PKTINFO\", strerror(errno));\n\n	// verify socket options \n	len = sizeof(val);\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMP, &val, &len) < 0)\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMP\", strerror(errno));\n	else\n		DEBUG(\"SO_TIMESTAMP %d\\n\", val);\n\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMPNS, &val, &len) < 0)\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMPNS\",\n		       strerror(errno));\n	else\n		DEBUG(\"SO_TIMESTAMPNS %d\\n\", val);\n\n	if (getsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING, &val, &len) < 0) {\n		DEBUG(\"%s: %s\\n\", \"getsockopt SO_TIMESTAMPING\",\n		       strerror(errno));\n	} else {\n		DEBUG(\"SO_TIMESTAMPING %d\\n\", val);\n		if (val != so_timestamping_flags)\n			DEBUG(\"   not the expected value %d\\n\",\n			       so_timestamping_flags);\n	}\n\n\n	// send packets forever every five seconds \n	gettimeofday(&next, 0);\n	//next.tv_sec = (next.tv_sec + 1) ;\n	//next.tv_usec = 0;\n	while (1) {\n		struct timeval now;\n		struct timeval delta;\n		long delta_us;\n		int res;\n		fd_set readfs, errorfs;\n\n		gettimeofday(&now, 0);\n		delta_us = (long)(next.tv_sec - now.tv_sec) * 1000000 + (long)(next.tv_usec - now.tv_usec);\n\n		if(delta_us < 0){\n			// write one packet \n			sendpacket(sock,\n				   (struct sockaddr *)&addr,\n				   sizeof(addr));\n			next.tv_sec = next.tv_sec + ((long)(1000+next.tv_usec))/1000000;\n			next.tv_usec = ((long)(1000+next.tv_usec))%1000000;\n			continue;\n		}\n	}\n	\n	return 0;\n}\n*/",
+			"file": "sender.c",
+			"file_size": 12195,
+			"file_write_time": 131024484584122376,
+			"settings":
+			{
+				"buffer_size": 11780,
+				"line_ending": "Windows"
+			}
+		},
+		{
+			"file": "tx_timestamping.c",
+			"settings":
+			{
+				"buffer_size": 14501,
+				"line_ending": "Unix"
+			}
+		}
 	],
 	"build_system": "",
 	"build_system_choices":
@@ -58,6 +77,8 @@
 	],
 	"file_history":
 	[
+		"/C/XING/SublimeText3/Data/Packages/Default/Preferences.sublime-settings",
+		"/C/XING/SublimeText3/Data/Packages/User/Preferences.sublime-settings",
 		"/Z/sync/gudaiwenxian/佛藏/大藏经/论藏/论疏部/瑜伽师地论略纂.txt",
 		"/C/Project/TestSuite/Current/data_tool/run_all_tests.py",
 		"/C/Project/LatencyHunter/LatencyHunter/sender.c",
@@ -172,8 +193,74 @@
 	"groups":
 	[
 		{
+			"selected": 0,
 			"sheets":
 			[
+				{
+					"buffer": 0,
+					"file": "sender.c",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 11780,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								1240,
+								1240
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.sublime-syntax",
+							"translate_tabs_to_spaces": false
+						},
+						"translation.x": 0.0,
+						"translation.y": 495.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 1,
+					"type": "text"
+				}
+			]
+		},
+		{
+			"selected": 0,
+			"sheets":
+			[
+				{
+					"buffer": 1,
+					"file": "tx_timestamping.c",
+					"semi_transient": false,
+					"settings":
+					{
+						"buffer_size": 14501,
+						"regions":
+						{
+						},
+						"selection":
+						[
+							[
+								0,
+								0
+							]
+						],
+						"settings":
+						{
+							"syntax": "Packages/C++/C.sublime-syntax",
+							"tab_size": 2,
+							"translate_tabs_to_spaces": true
+						},
+						"translation.x": 0.0,
+						"translation.y": 0.0,
+						"zoom_level": 1.0
+					},
+					"stack_index": 0,
+					"type": "text"
+				}
 			]
 		}
 	],
@@ -194,11 +281,18 @@
 				0,
 				1,
 				1
+			],
+			[
+				1,
+				0,
+				2,
+				1
 			]
 		],
 		"cols":
 		[
 			0.0,
+			0.5,
 			1.0
 		],
 		"rows":
@@ -246,7 +340,7 @@
 		],
 		"width": 0.0
 	},
-	"selected_group": 0,
+	"selected_group": 1,
 	"settings":
 	{
 	},
@@ -254,7 +348,7 @@
 	"show_open_files": true,
 	"show_tabs": true,
 	"side_bar_visible": true,
-	"side_bar_width": 321.0,
+	"side_bar_width": 185.0,
 	"status_bar_visible": true,
 	"template_settings":
 	{

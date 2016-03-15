@@ -42,30 +42,33 @@ static void make_address(char const* host, unsigned short port, struct sockaddr_
     host_address->sin_addr.s_addr=INADDR_ANY;
   }
 }
-
+	
 
 /* Option: --mcast group_ip_address */
-static void do_mcast(struct configuration* cfg, int sock)
+static void do_mcast(struct configuration* cfg, int sock, struct sockaddr_in* addr)
 {
-  struct ip_mreq req;
+	struct ip_mreq req;
 
-  if (cfg->cfg_mcast == NULL)
-    return;
+	if (cfg->cfg_mcast == NULL)
+		return;
 
-  bzero(&req, sizeof(req));
-  TRY(inet_aton(cfg->cfg_mcast, &req.imr_multiaddr));
+	bzero(&req, sizeof(req));
+	TRY(inet_aton(cfg->cfg_mcast, &req.imr_multiaddr));
 
-  req.imr_interface.s_addr = INADDR_ANY;
-  TRY(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &req, sizeof(req)));
+	req.imr_interface.s_addr = INADDR_ANY;
+	TRY(setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &req, sizeof(req)));
 
 
 
   //* set multicast group for outgoing packets
-	inet_aton("224.0.0.1", &iaddr); //* alternate PTP domain 1 
+ 	struct ip_mreq imr;
+ 	struct in_addr iaddr;
+	inet_aton("224.0.0.1", &iaddr);
 	addr.sin_addr = iaddr;
 	imr.imr_multiaddr.s_addr = iaddr.s_addr;
 	imr.imr_interface.s_addr =
 		((struct sockaddr_in *)&device.ifr_addr)->sin_addr.s_addr;
+	
 	if (setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF,
 		       &imr.imr_interface.s_addr, sizeof(struct in_addr)) < 0)
 		bail("set multicast");
@@ -96,8 +99,8 @@ int setup_socket(int sock, struct configuration cfg){
 	struct ifreq hwtstamp;
 	struct hwtstamp_config hwconfig, hwconfig_requested;
 	struct sockaddr_in addr;
-	struct ip_mreq imr;
-	struct in_addr iaddr;
+	
+	
 	int val;
 	socklen_t len;
 	struct timeval next;
