@@ -54,9 +54,24 @@ int main(int argc, char *argv[]) {
   }
   
 
+  /*
+  len = recvfrom(fd, msgbuf, UDP_MAX_PAYLOAD_LEN, 0, (struct sockaddr *)dest, (socklen_t*)&destlen);
+將其改為recvmsg並且設定一些sockopt去取得interface的相關資訊
+
+setsockopt(fd, SOL_IP, IP_PKTINFO, &on, sizeof(on));
+iov.iov_base = (void*)msgbuf;
+iov.iov_len = (size_t) UDP_MAX_PAYLOAD_LEN;
+msg.msg_name = (struct sockaddr*)dest;
+msg.msg_namelen = (socklen_t)destlen;
+msg.msg_iov = &iov;
+msg.msg_iovlen = 1;
+msg.msg_control = cbuf;
+msg.msg_controllen = sizeof(cbuf);
+*/
+
   struct sockaddr_in echoclient;
   char buffer[BUFFSIZE];
-  unsigned int echolen, clientlen;
+  unsigned int clientlen;
   /* Receive the word back from the server */
   fprintf(stdout, "Received: ");
   clientlen = sizeof(echoclient);
