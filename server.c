@@ -18,8 +18,8 @@ int main(int argc, char *argv[]) {
   unsigned int echolen, clientlen, serverlen;
   int received = 0;
 
-  if (argc != 2) {
-    fprintf(stderr, "USAGE: %s <port>\n", argv[0]);
+  if (argc != 3) {
+    fprintf(stderr, "USAGE: server <HOST> <port>\n");
     exit(1);
   }
  
@@ -31,8 +31,9 @@ if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 /* Construct the server sockaddr_in structure */
 memset(&echoserver, 0, sizeof(echoserver));       /* Clear struct */
 echoserver.sin_family = AF_INET;                  /* Internet/IP */
-echoserver.sin_addr.s_addr = htonl(INADDR_ANY);   /* Any IP address */
-echoserver.sin_port = htons(atoi(argv[1]));       /* server port */
+//echoserver.sin_addr.s_addr = htonl(INADDR_ANY);   /* Any IP address */
+echoserver.sin_addr.s_addr = inet_addr(argv[1]);   /* Any IP address */
+echoserver.sin_port = htons(atoi(argv[2]));       /* server port */
 
 /* Bind the socket */
 serverlen = sizeof(echoserver);
