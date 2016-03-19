@@ -28,7 +28,7 @@
 #include <asm/types.h>
 #include <linux/errqueue.h>
 
-  
+#include "DEBUG.h"
 
 /* These are defined in socket.h, but older versions might not have all 3 */
 #ifndef SO_TIMESTAMP
@@ -44,7 +44,6 @@
 #define BUFFSIZE 255
 #define TIME_FMT "%" PRIu64 ".%.9" PRIu64 " "
 
-
 void Die(char *mess) { perror(mess); exit(1); }
 
 int usage(){
@@ -58,7 +57,23 @@ int set_socket_reuse(int sock){
   return 0;
 }
 
+/*
+void make_address(char const* host, unsigned short port, struct sockaddr_in* host_address){
+  struct hostent *hPtr;
 
+  bzero(host_address, sizeof(struct sockaddr_in));
+
+  host_address->sin_family = AF_INET;
+  host_address->sin_port = htons(port);
+
+  if (host != NULL) {
+    hPtr = (struct hostent *) gethostbyname(host);
+    memcpy((char *)&host_address->sin_addr, hPtr->h_addr, hPtr->h_length);
+  } else {
+    host_address->sin_addr.s_addr=INADDR_ANY;
+  }
+}
+*/
 
 void print_time(char *s, struct timespec *ts){
    printf("%s timestamp " TIME_FMT "\n", s, 
@@ -105,12 +120,12 @@ static void do_ts_sockopt(int sock)
 
 int main(int argc, char *argv[]) {
   int sock;
-  struct sockaddr_in echoserver;
+  
   
   unsigned int echolen;
   int received = 0;
 
-  if (argc != 4) {
+  if (argc != 5) {
     usage();
   }
  
@@ -123,38 +138,46 @@ int main(int argc, char *argv[]) {
   int on = 1;
   setsockopt(sock, SOL_IP, IP_PKTINFO, &on, sizeof(on));
   do_ts_sockopt(sock);
-  /* Construct the server sockaddr_in structure */
-  memset(&echoserver, 0, sizeof(echoserver));       /* Clear struct */
-  echoserver.sin_family = AF_INET;                  /* Internet/IP */
-  echoserver.sin_addr.s_addr = inet_addr(argv[1]);  /* IP address */
-  echoserver.sin_port = htons(atoi(argv[2]));       /* server port */
   
+  struct sockaddr_in server_addr;
+  memset(&server_addr, 0, sizeof(server_addr));       /* Clear struct */
+  server_addr.sin_family = AF_INET;                  /* Internet/IP */
+  server_addr.sin_addr.s_addr = inet_addr(argv[1]);  /* IP address */
+  server_addr.sin_port = htons(atoi(argv[2]));       /* server port */
+
+  struct sockaddr_in client_addr;
+  memset(&client_addr, 0, sizeof(client_addr));       
+  client_addr.sin_family = AF_INET;                  
+  client_addr.sin_addr.s_addr=inet_addr(argv[3]);
+  client_addr.sin_port =  htons(atoi(argv[4]));;       
+  if(bind(sock, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0){
+    Die("bind");
+  }
+
+  struct sockaddr_in recv_addr;
+  memset(&recv_addr, 0, sizeof(recv_addr));       
+  recv_addr.sin_family = AF_INET;                  
+  recv_addr.sin_addr.s_addr=INADDR_ANY;
+  recv_addr.sin_port = htons(0);       
 
   /* Send the word to the server */
   /*
   echolen = strlen(argv[3]);
   if (sendto(sock, argv[3], echolen, 0,
-             (struct sockaddr *) &echoserver,
-             sizeof(echoserver)) != echolen) {
+             (struct sockaddr *) &server_addr,
+             sizeof(server_addr)) != echolen) {
     Die("Mismatch in number of sent bytes");
   }
   */
 
 
 
-  struct sockaddr_in echoclient;
-  memset(&echoclient, 0, sizeof(echoclient));       
-  echoclient.sin_family = AF_INET;                  
-  echoclient.sin_addr.s_addr=INADDR_ANY;
-  //echoclient.sin_port = htons(atoi(argv[2]));       
 
 
 
   char buffer[BUFFSIZE];
   unsigned int clientlen;
-  /* Receive the word back from the server */
-  fprintf(stdout, "Received: ");
-  clientlen = sizeof(echoclient);
+  clientlen = sizeof(client_addr);
 
   struct msghdr msg;
   struct iovec iov;
@@ -168,27 +191,33 @@ int main(int argc, char *argv[]) {
   msg.msg_namelen = sizeof(struct sockaddr_in);
   msg.msg_control = control;
   msg.msg_controllen = 1024;
+  msg.msg_name = &recv_addr;
+  
+
+  char pay_load[64];
 for(int i = 0; i < 10; i++){
-  msg.msg_name = &echoserver;
-  sendmsg(sock, &msg, 0);
-  msg.msg_name = &echoclient;
-  got = recvmsg(sock, &msg, MSG_ERRQUEUE);
-  if(got > 0){
+  //msg.msg_name = &server_addr;
+  //sendmsg(sock, &msg, 0);
+  DEBUG("------------------------------");
+  sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
+  do {
+    got = recvmsg(sock, &msg, MSG_ERRQUEUE);
+  } while (got < 0 && errno == EAGAIN);
+  if(got >= 0){
    handle_time(&msg);
   }else{
     printf("got < 0\n");
   }
 
-  got = recvmsg(sock, &msg, 0);
-  handle_time(&msg);
-   
-   /*
-   got = recvmsg(sock, &msg, 0);
-   
-
-    buffer[received] = '\0';        
-    fprintf(stdout, "\n");
-    */
+  do {
+    got = recvmsg(sock, &msg, 0);
+  } while (got < 0);
+  if(got >= 0){
+   handle_time(&msg);
+  }else{
+    printf("got < 0\n");
+  }
+  
 }
   close(sock);
   exit(0);
