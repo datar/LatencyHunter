@@ -6,7 +6,6 @@
 #include <errno.h>
 //#include <time.h>
 #include <getopt.h>
-
 #include <netdb.h>
 #include <sys/types.h>
 //#include <sys/time.h>
@@ -46,8 +45,78 @@
 
 void Die(char *mess) { perror(mess); exit(1); }
 
+
+struct configuration {
+  int protocol;
+  char const* host_ip;    
+  unsigned short host_port;    
+  char const* server_ip;
+  unsigned short server_port;
+  unsigned int msg_size;
+  unsigned int   max_packets; /* Stop after this many (0=forever) */
+};
+
+
+static void parse_options( int argc, char** argv, struct configuration* cfg )
+{
+  int option_index = 0;
+  int opt;
+  static struct option long_options[] = {
+    { "protocol", required_argument, 0, 't' },
+    { "host", required_argument, 0, 'i' },
+    { "port", required_argument, 0, 'p' },
+    { "server_ip", required_argument, 0, 's'}
+    { "server_port", required_argument, 0, 'r'}
+    { "msg_szie", required_argument, 0, 'm'}
+    { "max", required_argument, 0, 'n' },
+    { "help", no_argument, 0, 'h' },
+    { 0, no_argument, 0, 0 }
+  };
+  char const* optstring = "tipsrmnh";
+
+  /* Defaults */
+  bzero(cfg, sizeof(struct configuration));
+  cfg->protocol = IPPROTO_UDP;
+  cfg->host_port = 11111;
+  cfg->server_port = 11111;
+  cfg->max_packets = 10;
+
+  opt = getopt_long(argc, argv, optstring, long_options, &option_index);
+  while( opt != -1 ) {
+    switch( opt ) {
+      case 't':
+        cfg->protocol = get_protocol(optarg);
+        break;
+      case 'i':
+        cfg->host_ip = optarg;
+        break;
+      case 'p':
+        cfg->host_port = atoi(optarg);
+        break;
+      case 's':
+        cfg->server_ip = optarg;
+        break;
+      case 'r':
+        cfg->server_port = atoi(optarg);
+        break;
+      case 'm':
+        cfg->msg_size = atoi(optarg);
+        break;
+      case 'n':
+        cfg->max_packets = atoi(optarg);
+        break;
+      case 'h':
+      default:
+        usage();
+        break;
+    }
+    opt = getopt_long(argc, argv, optstring, long_options, &option_index);
+  }
+}
+
+
 int usage(){
-  fprintf(stderr, "USAGE: <server_ip> <port> <word>\n");
+  fprintf(stderr, "USAGE: client --host <host_ip> --port <host_port> --server_ip <server_ip> --server_port <server_port> --msg_size <size> --\n");
   exit(1);
 }
 
@@ -57,23 +126,19 @@ int set_socket_reuse(int sock){
   return 0;
 }
 
-/*
-void make_address(char const* host, unsigned short port, struct sockaddr_in* host_address){
-  struct hostent *hPtr;
 
-  bzero(host_address, sizeof(struct sockaddr_in));
-
-  host_address->sin_family = AF_INET;
-  host_address->sin_port = htons(port);
-
+void make_address(char const* host, unsigned short port, struct sockaddr_in* host_addr){
+  memset(&host_addr, 0, sizeof(sockaddr_in));
+  host_addr->sin_family = AF_INET;
+  host_addr->sin_port = htons(port);
   if (host != NULL) {
-    hPtr = (struct hostent *) gethostbyname(host);
-    memcpy((char *)&host_address->sin_addr, hPtr->h_addr, hPtr->h_length);
+    struct hostent *hPtr = (struct hostent *) gethostbyname(host);
+    memcpy((char *)&host_addr->sin_addr, hPtr->h_addr, hPtr->h_length);
   } else {
-    host_address->sin_addr.s_addr=INADDR_ANY;
+    host_addr->sin_addr.s_addr=INADDR_ANY;
   }
 }
-*/
+
 
 void print_time(char *s, struct timespec *ts){
    printf("%s timestamp " TIME_FMT "\n", s, 
@@ -119,17 +184,10 @@ static void do_ts_sockopt(int sock)
 }
 
 int main(int argc, char *argv[]) {
+  struct configuration config;
+  parse_options(argc, argv, &config);
   int sock;
-  
-  
-  unsigned int echolen;
   int received = 0;
-
-  if (argc != 5) {
-    usage();
-  }
- 
-
   /* Create the UDP socket */
   if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
     Die("Failed to create socket");
@@ -140,42 +198,27 @@ int main(int argc, char *argv[]) {
   do_ts_sockopt(sock);
   
   struct sockaddr_in server_addr;
-  memset(&server_addr, 0, sizeof(server_addr));       /* Clear struct */
-  server_addr.sin_family = AF_INET;                  /* Internet/IP */
-  server_addr.sin_addr.s_addr = inet_addr(argv[1]);  /* IP address */
-  server_addr.sin_port = htons(atoi(argv[2]));       /* server port */
+  make_address(config.server_ip, server_port, &server_addr)
+
+  /*
+  memset(&server_addr, 0, sizeof(server_addr));      
+  server_addr.sin_family = AF_INET;                  
+  server_addr.sin_addr.s_addr = inet_addr(argv[1]);  
+  server_addr.sin_port = htons(atoi(argv[2]));       
+*/
 
   struct sockaddr_in client_addr;
-  memset(&client_addr, 0, sizeof(client_addr));       
-  client_addr.sin_family = AF_INET;                  
-  client_addr.sin_addr.s_addr=inet_addr(argv[3]);
-  client_addr.sin_port =  htons(atoi(argv[4]));;       
+  make_address(config.host_ip, host_port, &client_addr)
+
   if(bind(sock, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0){
     Die("bind");
   }
 
   struct sockaddr_in recv_addr;
-  memset(&recv_addr, 0, sizeof(recv_addr));       
-  recv_addr.sin_family = AF_INET;                  
-  recv_addr.sin_addr.s_addr=INADDR_ANY;
-  recv_addr.sin_port = htons(0);       
-
-  /* Send the word to the server */
-  /*
-  echolen = strlen(argv[3]);
-  if (sendto(sock, argv[3], echolen, 0,
-             (struct sockaddr *) &server_addr,
-             sizeof(server_addr)) != echolen) {
-    Die("Mismatch in number of sent bytes");
-  }
-  */
+  make_address(0, 0, &recv_addr)       
 
 
-
-
-
-
-  char buffer[BUFFSIZE];
+  char buffer[config.msg_size];
   unsigned int clientlen;
   clientlen = sizeof(client_addr);
 
@@ -192,13 +235,10 @@ int main(int argc, char *argv[]) {
   msg.msg_control = control;
   msg.msg_controllen = 1024;
   msg.msg_name = &recv_addr;
-  
 
-  char pay_load[64];
-for(int i = 0; i < 10; i++){
-  //msg.msg_name = &server_addr;
-  //sendmsg(sock, &msg, 0);
-  DEBUG("------------------------------");
+  char pay_load[config.msg_size];
+
+for(int i = 0; i < config.max_packets; i++){
   sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
   do {
     got = recvmsg(sock, &msg, MSG_ERRQUEUE);
@@ -206,16 +246,16 @@ for(int i = 0; i < 10; i++){
   if(got >= 0){
    handle_time(&msg);
   }else{
-    printf("got < 0\n");
+    DEBUG("Unable to get TX_TIMESTAMPING\n");
   }
 
   do {
     got = recvmsg(sock, &msg, 0);
-  } while (got < 0);
+  } while (got < 0 && errno == EAGAIN);
   if(got >= 0){
    handle_time(&msg);
   }else{
-    printf("got < 0\n");
+    DEBUG("Unable to get RESPONSE MSG\n");
   }
   
 }
