@@ -1,32 +1,35 @@
 #include "headers.h"
 
 
-#define TIME_FMT "%" PRIu64 ".%.9" PRIu64 " "
-
 void Die(char *mess) { perror(mess); exit(1); }
 
 
 struct configuration {
 	int protocol;
 	char const* host_ip;
-	unsigned short host_port;
+	unsigned int host_port;
 	char const* server_ip;
-	unsigned short server_port;
+	unsigned int server_port;
 	unsigned int msg_size;
-	unsigned int   max_packets; /* Stop after this many (0=forever) */
+	unsigned int max_packets; /* Stop after this many (0=forever) */
 };
 
 
-void parse_options( int argc, char** argv, struct configuration* cfg ){
+int usage(){
+	fprintf(stderr, "USAGE: client --host <host_ip> --port <host_port> --server_ip <server_ip> --server_port <server_port> --msg_size <size> --max_packets <number>\n");
+	exit(1);
+}
+
+static void parse_options( int argc, char** argv, struct configuration* cfg ){
 	int option_index = 0;
 	int opt;
-	struct option long_options[] = {
+	static struct option long_options[] = {
 			{ "protocol", required_argument, 0, 't' },
 			{ "host", required_argument, 0, 'i' },
 			{ "port", required_argument, 0, 'p' },
 			{ "server_ip", required_argument, 0, 's'},
 			{ "server_port", required_argument, 0, 'r'},
-			{ "msg_szie", required_argument, 0, 'm'},
+			{ "msg_size", required_argument, 0, 'm'},
 			{ "max", required_argument, 0, 'n' },
 			{ "help", no_argument, 0, 'h' },
 			{ 0, no_argument, 0, 0 }
@@ -34,17 +37,20 @@ void parse_options( int argc, char** argv, struct configuration* cfg ){
 	char const* optstring = "tipsrmnh";
 
 	/* Defaults */
-	bzero(cfg, sizeof(struct configuration));
+	memset(cfg, 0, sizeof(struct configuration));
 	cfg->protocol = IPPROTO_UDP;
+	cfg->host_ip = "192.168.1.1";
 	cfg->host_port = 11111;
+	cfg->server_ip = "192.168.1.2";
 	cfg->server_port = 11111;
+	cfg->msg_size = 64;
 	cfg->max_packets = 10;
 
 	opt = getopt_long(argc, argv, optstring, long_options, &option_index);
 	while( opt != -1 ) {
 		switch( opt ) {
 		case 't':
-			cfg->protocol = get_protocol(optarg);
+			//cfg->protocol = get_protocol(optarg);
 			break;
 		case 'i':
 			cfg->host_ip = optarg;
@@ -74,10 +80,7 @@ void parse_options( int argc, char** argv, struct configuration* cfg ){
 }
 
 
-int usage(){
-	fprintf(stderr, "USAGE: client --host <host_ip> --port <host_port> --server_ip <server_ip> --server_port <server_port> --msg_size <size> --\n");
-	exit(1);
-}
+
 
 int set_socket_reuse(int sock){
 	int on = 1;
@@ -86,22 +89,21 @@ int set_socket_reuse(int sock){
 }
 
 
-void make_address(char const* host, unsigned short port, struct sockaddr_in* host_addr){
-	memset(&host_addr, 0, sizeof(struct sockaddr_in));
+void make_address(char const* host, unsigned int port, struct sockaddr_in* host_addr){
+	memset(host_addr, 0, sizeof(struct sockaddr_in));
 	host_addr->sin_family = AF_INET;
 	host_addr->sin_port = htons(port);
 	if (host != NULL) {
 		struct hostent *hPtr = (struct hostent *) gethostbyname(host);
-		memcpy((char *)&host_addr->sin_addr, hPtr->h_addr, hPtr->h_length);
+		memcpy((char *)&host_addr->sin_addr, hPtr->h_addr_list[0], hPtr->h_length);
 	} else {
 		host_addr->sin_addr.s_addr=INADDR_ANY;
 	}
 }
 
-
+#define TIME_FMT "%" PRIu64 ".%.9" PRIu64 " "
 void print_time(char *s, struct timespec *ts){
-	printf("%s timestamp " TIME_FMT "\n", s,
-			(uint64_t)ts->tv_sec, (uint64_t)ts->tv_nsec);
+	printf("" TIME_FMT "\n", (uint64_t)ts->tv_sec, (uint64_t)ts->tv_nsec);
 }
 
 void handle_time(struct msghdr* msg){
@@ -126,6 +128,26 @@ void handle_time(struct msghdr* msg){
 }
 
 
+void keep_time(struct msghdr* msg, struct timespec* ts){
+	struct timespec* udp_tx_stamp;
+	struct cmsghdr* cmsg;
+
+	for (cmsg = CMSG_FIRSTHDR(msg); cmsg != NULL; cmsg = CMSG_NXTHDR(msg, cmsg)) {
+		if (cmsg->cmsg_level != SOL_SOCKET)
+			continue;
+		switch(cmsg->cmsg_type) {
+		case SO_TIMESTAMPING:
+			udp_tx_stamp = (struct timespec*) CMSG_DATA(cmsg);
+			memcpy(ts, ((struct timespec*) CMSG_DATA(cmsg)+2, sizeof(struct timespec));
+			break;
+		default:
+			DEBUG("NO_TS\n");
+			break;
+		}
+	}
+};
+
+
 static void do_ts_sockopt(int sock)
 {
 	int enable = 1;
@@ -148,7 +170,7 @@ int main(int argc, char *argv[]) {
 	struct configuration config;
 	parse_options(argc, argv, &config);
 	int sock;
-	int received = 0;
+
 	/* Create the UDP socket */
 	if ((sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
 		Die("Failed to create socket");
@@ -157,27 +179,16 @@ int main(int argc, char *argv[]) {
 	int on = 1;
 	setsockopt(sock, SOL_IP, IP_PKTINFO, &on, sizeof(on));
 	do_ts_sockopt(sock);
-
 	struct sockaddr_in server_addr;
 	make_address(config.server_ip, config.server_port, &server_addr);
-
-	/*
-memset(&server_addr, 0, sizeof(server_addr));
-server_addr.sin_family = AF_INET;
-server_addr.sin_addr.s_addr = inet_addr(argv[1]);
-server_addr.sin_port = htons(atoi(argv[2]));
-	 */
-
 	struct sockaddr_in client_addr;
 	make_address(config.host_ip, config.host_port, &client_addr);
-
 	if(bind(sock, (struct sockaddr*)&client_addr, sizeof(client_addr)) < 0){
 		Die("bind");
 	}
 
 	struct sockaddr_in recv_addr;
 	make_address(0, 0, &recv_addr);
-
 
 	char buffer[config.msg_size];
 	unsigned int clientlen;
@@ -196,9 +207,8 @@ server_addr.sin_port = htons(atoi(argv[2]));
 	msg.msg_control = control;
 	msg.msg_controllen = 1024;
 	msg.msg_name = &recv_addr;
-
 	char pay_load[config.msg_size];
-
+	struct timespec result[config.max_packets][2];
 	for(int i = 0; i < config.max_packets; i++){
 		sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
 		do {
@@ -206,6 +216,7 @@ server_addr.sin_port = htons(atoi(argv[2]));
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
 			handle_time(&msg);
+			keep_time(msg, result[i])
 		}else{
 			DEBUG("Unable to get TX_TIMESTAMPING\n");
 		}
@@ -215,11 +226,13 @@ server_addr.sin_port = htons(atoi(argv[2]));
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
 			handle_time(&msg);
+			result[i]+1
 		}else{
 			DEBUG("Unable to get RESPONSE MSG\n");
 		}
 
 	}
+
 	close(sock);
 	exit(0);
 }

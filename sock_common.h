@@ -14,30 +14,9 @@
 #ifndef SOCK_COMMON_H
 #define SOCK_COMMON_H
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-
-
-
-#ifdef __cplusplus
-}
-#endif
-
-
-struct configuration {
-  int            protocol;  /* protocol: udp or tcp */
-  char const*    host;      /* listen address */
-  char const*    interface;     /* e.g. eth6  - calls the ts enable ioctl */
-  unsigned short port;      /* listen port */
-  unsigned int   max_packets; /* Stop after this many (0=forever) */
-};
 
 int print_timespec(struct timespec *ts);
-static void usage(const char *error);
 static void bail(const char *error);
-static void parse_options( int argc, char** argv, struct configuration* cfg );
 
 #endif /* SOCK_COMMON_H */
 
