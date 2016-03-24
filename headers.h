@@ -14,16 +14,11 @@
 #ifndef HEADERS_H
 #define HEADERS_H
 
+/*
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-
-
-
-#ifdef __cplusplus
-}
-#endif
+*/
 
 #include <unistd.h>
 #include <stdio.h>
@@ -31,7 +26,7 @@ extern "C" {
 #include <string.h>
 #include <inttypes.h>
 #include <errno.h>
-//#include <time.h>
+#include <time.h>
 #include <getopt.h>
 #include <netdb.h>
 #include <sys/types.h>
@@ -44,20 +39,13 @@ extern "C" {
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 
+//#include <linux/time.h>
 #include <linux/net_tstamp.h>
 #include <linux/socket.h>
 #include <linux/sockios.h>
-#include <linux/time.h>
 #include <linux/errqueue.h>
 
-#include <netdb.h>
 #include <getopt.h>
-
-#include <asm/types.h>
-#include <linux/errqueue.h>
-
-
-#include <net/if.h>
 #include <asm/types.h>
 
 

@@ -11,7 +11,7 @@ struct configuration {
 	char const* server_ip;
 	unsigned int server_port;
 	unsigned int msg_size;
-	unsigned int max_packets; /* Stop after this many (0=forever) */
+	unsigned int max_packets;
 };
 
 
@@ -79,9 +79,6 @@ static void parse_options( int argc, char** argv, struct configuration* cfg ){
 	}
 }
 
-
-
-
 int set_socket_reuse(int sock){
 	int on = 1;
 	setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
@@ -138,7 +135,7 @@ void keep_time(struct msghdr* msg, struct timespec* ts){
 		switch(cmsg->cmsg_type) {
 		case SO_TIMESTAMPING:
 			udp_tx_stamp = (struct timespec*) CMSG_DATA(cmsg);
-			memcpy(ts, ((struct timespec*) CMSG_DATA(cmsg)+2, sizeof(struct timespec));
+			memcpy(ts, ((struct timespec*) CMSG_DATA(cmsg))+2, sizeof(struct timespec));
 			break;
 		default:
 			DEBUG("NO_TS\n");
@@ -208,16 +205,17 @@ int main(int argc, char *argv[]) {
 	msg.msg_controllen = 1024;
 	msg.msg_name = &recv_addr;
 	char pay_load[config.msg_size];
-	struct timespec result[config.max_packets][4];
-	for(int i = 0; i < config.max_packets; i++){
+	//struct timespec *data = (struct timespec *)malloc(sizeof(struct timespec)*4*config.max_packets);
+	struct timespec (*result)[4] = (struct timespec ((*)[4]))malloc(sizeof(struct timespec)*4*config.max_packets);;
+	int i;
+	for(i = 0; i < config.max_packets; i++){
 		clock_gettime(CLOCK_REALTIME, result[i]);
 		sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
 		do {
 			got = recvmsg(sock, &msg, MSG_ERRQUEUE);
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
-			handle_time(&msg);
-			keep_time(&msg, result[i]+1)
+			keep_time(&msg, result[i]+1);
 		}else{
 			DEBUG("Unable to get TX_TIMESTAMPING\n");
 		}
@@ -226,14 +224,27 @@ int main(int argc, char *argv[]) {
 			got = recvmsg(sock, &msg, 0);
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
-			clock_gettime(CLOCK_REALTIME, result[i]+3)
-			handle_time(&msg);
+			clock_gettime(CLOCK_REALTIME, result[i]+3);
 			keep_time(&msg, result[i]+2);
 		}else{
 			DEBUG("Unable to get RESPONSE MSG\n");
 		}
 
 	}
+	FILE* outfile;
+	outfile = fopen("result.txt", "w");
+	for(i = 0; i < config.max_packets; i++){
+		int j;
+		for (j = 0; j < 4; j++){
+			if (j < 3){
+				fprintf(outfile, "%ld,%9ld,", result[i][j].tv_sec, result[i][j].tv_nsec);
+			}else{
+				fprintf(outfile, "%ld,%9ld\n", result[i][j].tv_sec, result[i][j].tv_nsec);
+			}
+		}
+		
+	}
+	close(outfile);
 
 	close(sock);
 	exit(0);
