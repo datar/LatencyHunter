@@ -25,6 +25,7 @@ extern "C" {
 }
 #endif
 
+
 struct configuration {
   int            protocol;  /* protocol: udp or tcp */
   char const*    host;      /* listen address */
