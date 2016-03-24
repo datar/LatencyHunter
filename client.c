@@ -208,15 +208,16 @@ int main(int argc, char *argv[]) {
 	msg.msg_controllen = 1024;
 	msg.msg_name = &recv_addr;
 	char pay_load[config.msg_size];
-	struct timespec result[config.max_packets][2];
+	struct timespec result[config.max_packets][4];
 	for(int i = 0; i < config.max_packets; i++){
+		clock_gettime(CLOCK_REALTIME, result[i]);
 		sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
 		do {
 			got = recvmsg(sock, &msg, MSG_ERRQUEUE);
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
 			handle_time(&msg);
-			keep_time(msg, result[i])
+			keep_time(&msg, result[i]+1)
 		}else{
 			DEBUG("Unable to get TX_TIMESTAMPING\n");
 		}
@@ -225,8 +226,9 @@ int main(int argc, char *argv[]) {
 			got = recvmsg(sock, &msg, 0);
 		} while (got < 0 && errno == EAGAIN);
 		if(got >= 0){
+			clock_gettime(CLOCK_REALTIME, result[i]+3)
 			handle_time(&msg);
-			result[i]+1
+			keep_time(&msg, result[i]+2);
 		}else{
 			DEBUG("Unable to get RESPONSE MSG\n");
 		}
