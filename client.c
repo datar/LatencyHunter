@@ -135,7 +135,7 @@ void keep_time(struct msghdr* msg, struct timespec* ts){
 		switch(cmsg->cmsg_type) {
 		case SO_TIMESTAMPING:
 			udp_tx_stamp = (struct timespec*) CMSG_DATA(cmsg);
-			memcpy(ts, ((struct timespec*) CMSG_DATA(cmsg))+2, sizeof(struct timespec));
+			memcpy(ts, ((struct timespec*) CMSG_DATA(cmsg))+1, sizeof(struct timespec));
 			break;
 		default:
 			DEBUG("NO_TS\n");
@@ -145,17 +145,13 @@ void keep_time(struct msghdr* msg, struct timespec* ts){
 };
 
 
-static void do_ts_sockopt(int sock)
-{
-	int enable = 1;
-	int ok = 0;
-
+static void do_ts_sockopt(int sock){
 	printf("Selecting hardware timestamping mode.\n");
-	enable = SOF_TIMESTAMPING_RX_HARDWARE
+	int enable = SOF_TIMESTAMPING_RX_HARDWARE
 			|SOF_TIMESTAMPING_TX_HARDWARE
 			|SOF_TIMESTAMPING_SYS_HARDWARE
 			|SOF_TIMESTAMPING_RAW_HARDWARE;
-	ok = setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING, &enable, sizeof(int));
+	int ok = setsockopt(sock, SOL_SOCKET, SO_TIMESTAMPING, &enable, sizeof(int));
 	if (ok < 0) {
 		printf("Timestamp socket option failed.  %d (%d - %s)\n",
 				ok, errno, strerror(errno));
@@ -205,21 +201,14 @@ int main(int argc, char *argv[]) {
 	msg.msg_controllen = 1024;
 	msg.msg_name = &recv_addr;
 	char pay_load[config.msg_size];
-	//struct timespec *data = (struct timespec *)malloc(sizeof(struct timespec)*4*config.max_packets);
-	struct timespec (*result)[4] = (struct timespec ((*)[4]))malloc(sizeof(struct timespec)*4*config.max_packets);;
+	
+	size_t result_len = sizeof(struct timespec)*4*config.max_packets;
+	struct timespec (*result)[4] = (struct timespec ((*)[4]))malloc(result_len);
+	memset(result[0], 0, result_len);
 	int i;
 	for(i = 0; i < config.max_packets; i++){
 		clock_gettime(CLOCK_REALTIME, result[i]);
-		sendto(sock, pay_load, 64, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
-		do {
-			got = recvmsg(sock, &msg, MSG_ERRQUEUE);
-		} while (got < 0 && errno == EAGAIN);
-		if(got >= 0){
-			keep_time(&msg, result[i]+1);
-		}else{
-			DEBUG("Unable to get TX_TIMESTAMPING\n");
-		}
-
+		sendto(sock, pay_load, config.msg_size, 0, (struct sockaddr *) &server_addr, sizeof(server_addr));
 		do {
 			got = recvmsg(sock, &msg, 0);
 		} while (got < 0 && errno == EAGAIN);
@@ -229,6 +218,16 @@ int main(int argc, char *argv[]) {
 		}else{
 			DEBUG("Unable to get RESPONSE MSG\n");
 		}
+		do {
+			got = recvmsg(sock, &msg, MSG_ERRQUEUE);
+		} while (got < 0 && errno == EAGAIN);
+		if(got >= 0){
+			keep_time(&msg, result[i]+1);
+		}else{
+			DEBUG("Unable to get TX_TIMESTAMPING\n");
+		}
+
+		
 
 	}
 	FILE* outfile;
