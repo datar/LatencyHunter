@@ -337,3 +337,6 @@ local.properties
 .recommenders/
 
 # END Eclipse
+
+
+.idea/
