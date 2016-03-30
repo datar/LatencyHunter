@@ -91,7 +91,7 @@ def parse_raw_result(client, server, latency, merged=None, timestamp=None):
 
 def analyze_latency(latency):
     network_ratio = 100*latency[:, -1:] / latency[:, -2:-1]
-    data = np.hstack((latency, network_ratio))
+    data = np.hstack((latency, network_ratio))[20:, :]
     median = np.percentile(data, 50, 0)
     tile9 = np.percentile(data, 90, 0)
     tile99 = np.percentile(data, 99, 0)
