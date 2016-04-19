@@ -159,8 +159,7 @@ static void do_ts_sockopt(int sock){
 	}
 }
 
-static void runoncpu(int cpu)
-{
+static void runoncpu(int cpu){
   cpu_set_t cpuset;
 
   CPU_ZERO(&cpuset);

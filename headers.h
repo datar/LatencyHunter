@@ -19,7 +19,8 @@
 extern "C" {
 #endif
 */
-
+#define _GNU_SOURCE
+    
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,7 +49,6 @@ extern "C" {
 #include <getopt.h>
 #include <asm/types.h>
 #include <sched.h>
-
 #include "Constants.h"
 #include "DEBUG.h"
 
