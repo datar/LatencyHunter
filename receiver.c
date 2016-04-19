@@ -219,7 +219,7 @@ int main(int argc, char *argv[]) {
   msg.msg_name = &recv_addr;
 
 
-  const int timestamp_per_sample = 2
+  const int timestamp_per_sample = 2;
   size_t result_len = sizeof(struct timespec)*timestamp_per_sample*config.max_packets;
   struct timespec (*result)[timestamp_per_sample] = (struct timespec ((*)[timestamp_per_sample]))malloc(result_len);
   memset(result[0], 0, result_len);
