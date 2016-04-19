@@ -40,7 +40,6 @@ const int BlockSize = (2*1024*1024);
 
 static SysCpuInfo syscpus;
 
-struct HiccupsInfo;
 
 struct ThrdStart {
   HiccupsInfo*  hudata_;
@@ -52,8 +51,6 @@ struct ThrdStart {
 
 
 static HiccupConfig conf;
-
-
 
 volatile int HiccupsInfo::active_ __attribute__((aligned(0x40)));
 volatile int HiccupsInfo::runstate_ __attribute__((aligned(0x40)));

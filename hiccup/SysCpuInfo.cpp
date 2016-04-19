@@ -54,6 +54,5 @@ void SysCpuInfo::init()
   r2 = getccpermicro();
   if (r0 != r1 || r1 != r2) {
     fprintf(stderr, "Detected non stable clock rates: %ld %ld %ld\n", r0, r1, r2);
-    // exit(1);
   }
 }

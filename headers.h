@@ -47,7 +47,7 @@ extern "C" {
 
 #include <getopt.h>
 #include <asm/types.h>
-
+#include <sched.h>
 
 #include "Constants.h"
 #include "DEBUG.h"

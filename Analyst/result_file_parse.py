@@ -111,8 +111,8 @@ def main():
     server_file = sys.argv[2]
     latency_file = sys.argv[3]
     stats_file = sys.argv[4]
-    latency_file = parse_raw_result(client_file, server_file, latency_file)
-    stat = analyze_latency(latency_file)
+    latency_data = parse_raw_result(client_file, server_file, latency_file)
+    stat = analyze_latency(latency_data)
     df = pd.DataFrame(stat, index=STAT_NAMES, columns=STATS_TABLE_COLS_NAME)
     df.to_csv(stats_file, index=True, header=True, sep=RAW_RESULT_COL_SEP)
 

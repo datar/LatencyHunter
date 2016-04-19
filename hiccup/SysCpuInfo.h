@@ -1,3 +1,5 @@
+
+
 struct SysCpuInfo {
   int     maxcpus_;
   uint    ccpermicro_;
